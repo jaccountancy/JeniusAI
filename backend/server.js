@@ -30,6 +30,7 @@ app.get("/auth/xero/start", async (request, response) => {
     const clientID = process.env.XERO_CLIENT_ID;
     const configuredRedirectURI = resolveOAuthRedirectURI(request, process.env.XERO_REDIRECT_URI, "/auth/xero/callback");
     const appCallback = request.query.app_callback;
+    const debug = request.query.debug === "1";
 
     if (!clientID || !configuredRedirectURI) {
         return response.status(500).json({ message: "Missing Xero backend configuration." });
@@ -64,6 +65,16 @@ app.get("/auth/xero/start", async (request, response) => {
     authorizationURL.searchParams.set("state", state);
     authorizationURL.searchParams.set("code_challenge", challenge);
     authorizationURL.searchParams.set("code_challenge_method", "S256");
+
+    if (debug) {
+        return response.json({
+            provider: "xero",
+            clientID,
+            redirectURI: configuredRedirectURI,
+            scope: XERO_SCOPES,
+            authorizationURL: authorizationURL.toString()
+        });
+    }
 
     return response.redirect(302, authorizationURL.toString());
 });
