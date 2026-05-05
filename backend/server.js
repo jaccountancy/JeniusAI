@@ -9,7 +9,7 @@ const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 const pendingAuthorizations = new Map();
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
 
-const XERO_SCOPES = "openid profile email offline_access accounting.transactions";
+const XERO_SCOPES = "openid profile email offline_access accounting.settings";
 const IGNITION_SCOPES = "reporting";
 const APP_FALLBACK_CALLBACK_URI = process.env.APP_FALLBACK_CALLBACK_URI ?? "jeniusai://xero/callback";
 
