@@ -13,6 +13,7 @@ const XERO_SCOPES = "openid profile email offline_access accounting.settings";
 const IGNITION_SCOPES = "reporting";
 const APP_FALLBACK_CALLBACK_URI = process.env.APP_FALLBACK_CALLBACK_URI ?? "jeniusai://xero/callback";
 
+app.set("trust proxy", true);
 app.use(express.json());
 
 app.get("/health", async (_request, response) => {
@@ -27,7 +28,7 @@ app.get("/health", async (_request, response) => {
 
 app.get("/auth/xero/start", async (request, response) => {
     const clientID = process.env.XERO_CLIENT_ID;
-    const configuredRedirectURI = process.env.XERO_REDIRECT_URI;
+    const configuredRedirectURI = resolveOAuthRedirectURI(request, process.env.XERO_REDIRECT_URI, "/auth/xero/callback");
     const appCallback = request.query.app_callback;
 
     if (!clientID || !configuredRedirectURI) {
@@ -46,10 +47,14 @@ app.get("/auth/xero/start", async (request, response) => {
         provider: "xero",
         verifier,
         appCallback,
+        redirectURI: configuredRedirectURI,
         createdAt: Date.now()
     });
 
-    await recordAuditEvent("xero", "auth_start", "Started Xero OAuth flow.", { state });
+    await recordAuditEvent("xero", "auth_start", "Started Xero OAuth flow.", {
+        state,
+        redirectURI: configuredRedirectURI
+    });
 
     const authorizationURL = new URL("https://login.xero.com/identity/connect/authorize");
     authorizationURL.searchParams.set("response_type", "code");
@@ -83,7 +88,7 @@ app.get("/auth/xero/callback", async (request, response) => {
 
     const clientID = process.env.XERO_CLIENT_ID;
     const clientSecret = process.env.XERO_CLIENT_SECRET;
-    const configuredRedirectURI = process.env.XERO_REDIRECT_URI;
+    const configuredRedirectURI = resolveOAuthRedirectURI(request, process.env.XERO_REDIRECT_URI, "/auth/xero/callback");
 
     if (!clientID || !clientSecret || !configuredRedirectURI) {
         return response.status(500).json({ message: "Missing Xero environment variables on the backend." });
@@ -93,7 +98,7 @@ app.get("/auth/xero/callback", async (request, response) => {
         const result = await exchangeWithXero({
             clientID,
             clientSecret,
-            redirectURI: configuredRedirectURI,
+            redirectURI: pending.redirectURI ?? configuredRedirectURI,
             code,
             codeVerifier: pending.verifier
         });
@@ -119,13 +124,13 @@ app.post("/auth/xero/exchange", async (request, response) => {
 
     const clientID = process.env.XERO_CLIENT_ID;
     const clientSecret = process.env.XERO_CLIENT_SECRET;
-    const configuredRedirectURI = process.env.XERO_REDIRECT_URI;
+    const configuredRedirectURI = normalizeURLString(process.env.XERO_REDIRECT_URI);
 
     if (!clientID || !clientSecret || !configuredRedirectURI) {
         return response.status(500).json({ message: "Missing Xero environment variables on the backend." });
     }
 
-    if (redirectURI !== configuredRedirectURI) {
+    if (normalizeURLString(redirectURI) !== configuredRedirectURI) {
         return response.status(400).json({ message: "The redirect URI does not match the configured Xero redirect URI." });
     }
 
@@ -851,6 +856,64 @@ function randomString(length) {
 
 function codeChallenge(verifier) {
     return crypto.createHash("sha256").update(verifier).digest("base64url");
+}
+
+function resolveOAuthRedirectURI(request, configuredURL, callbackPath) {
+    const normalizedConfiguredURL = normalizeURLString(configuredURL);
+    const derivedRequestURL = buildPublicURL(request, callbackPath);
+
+    if (!derivedRequestURL) {
+        return normalizedConfiguredURL;
+    }
+
+    try {
+        const derivedURL = new URL(derivedRequestURL);
+        if (isLocalHost(derivedURL.hostname)) {
+            return normalizedConfiguredURL ?? derivedURL.toString();
+        }
+
+        return derivedURL.toString();
+    } catch {
+        return normalizedConfiguredURL;
+    }
+}
+
+function buildPublicURL(request, pathname) {
+    const forwardedProto = request.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const forwardedHost = request.get("x-forwarded-host")?.split(",")[0]?.trim();
+    const protocol = forwardedProto || request.protocol || "https";
+    const host = forwardedHost || request.get("host");
+
+    if (!host) {
+        return null;
+    }
+
+    return new URL(pathname, `${protocol}://${host}`).toString();
+}
+
+function normalizeURLString(value) {
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    const trimmedValue = value.trim().replace(/^['"]|['"]$/g, "");
+    if (!trimmedValue) {
+        return null;
+    }
+
+    try {
+        const normalizedURL = new URL(trimmedValue);
+        if (normalizedURL.pathname.length > 1) {
+            normalizedURL.pathname = normalizedURL.pathname.replace(/\/+$/, "");
+        }
+        return normalizedURL.toString();
+    } catch {
+        return null;
+    }
+}
+
+function isLocalHost(hostname) {
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 app.listen(port, async () => {
