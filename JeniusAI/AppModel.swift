@@ -159,6 +159,9 @@ final class AppModel {
     var selectedSection: NavigationSection = .dashboard
     var xeroConnection = XeroConnection()
     var isRestoring = true
+    var dashboardSnapshot: DashboardSnapshot?
+    var dashboardError: String?
+    var isLoadingDashboard = false
 
     let recentItems: [WorkspaceItem] = [
         WorkspaceItem(title: "Year-end accounts pack", subtitle: "Personal Folders", iconName: "doc.text"),
@@ -215,6 +218,7 @@ final class AppModel {
     }
 
     private let xeroAuthService = XeroAuthService()
+    private let dashboardDataService = DashboardDataService()
 
     var requiresAuthentication: Bool {
         isRestoring || xeroConnection.status != .connected
@@ -234,9 +238,10 @@ final class AppModel {
             xeroConnection.status = .connected
             xeroConnection.tenantName = result.tenantName
             xeroConnection.lastMessage = result.message
-            selectedSection = .settings
+            selectedSection = .dashboard
             persistSession(using: modelContext)
             appendHistory(.loginSucceeded, message: result.message, tenantName: result.tenantName, using: modelContext)
+            await refreshDashboard()
         } catch {
             xeroConnection.status = .failed
             xeroConnection.lastMessage = error.localizedDescription
@@ -256,6 +261,7 @@ final class AppModel {
 
             if xeroConnection.status == .connected {
                 appendHistory(.sessionRestored, message: session.lastMessage ?? "Restored persisted Xero session.", tenantName: session.tenantName, using: modelContext)
+                await refreshDashboard()
             }
             isRestoring = false
             return
@@ -267,6 +273,7 @@ final class AppModel {
             xeroConnection.lastMessage = restored.message
             persistSession(using: modelContext)
             appendHistory(.sessionRestored, message: restored.message, tenantName: restored.tenantName, using: modelContext)
+            await refreshDashboard()
         }
         isRestoring = false
     }
@@ -276,6 +283,8 @@ final class AppModel {
         xeroConnection = XeroConnection(status: .disconnected, tenantName: nil, lastMessage: "Connection reset. Ready to start again.")
         persistSession(using: modelContext)
         appendHistory(.sessionCleared, message: "Session cleared by user.", tenantName: nil, using: modelContext)
+        dashboardSnapshot = nil
+        dashboardError = nil
     }
 
     func setXeroFailure(_ message: String, using modelContext: ModelContext) {
@@ -283,6 +292,28 @@ final class AppModel {
         xeroConnection.lastMessage = message
         persistSession(using: modelContext)
         appendHistory(.loginFailed, message: message, tenantName: nil, using: modelContext)
+    }
+
+    func refreshDashboard() async {
+        guard xeroConnection.status == .connected else {
+            dashboardSnapshot = nil
+            return
+        }
+
+        isLoadingDashboard = true
+        dashboardError = nil
+
+        do {
+            let snapshot = try await dashboardDataService.fetchDashboard()
+            dashboardSnapshot = snapshot
+            if let tenantName = snapshot.tenantName {
+                xeroConnection.tenantName = tenantName
+            }
+        } catch {
+            dashboardError = error.localizedDescription
+        }
+
+        isLoadingDashboard = false
     }
 
     private func fetchSession(using modelContext: ModelContext) -> PersistedSession? {

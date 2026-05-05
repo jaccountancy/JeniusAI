@@ -8,6 +8,11 @@ Railway service for the Xero token exchange flow used by the iOS app.
 - `GET /auth/xero/start`
 - `GET /auth/xero/callback`
 - `POST /auth/xero/exchange`
+- `GET /auth/ignition/start`
+- `GET /auth/ignition/callback`
+- `GET /api/ignition/clients`
+- `GET /api/ignition/invoices`
+- `POST /api/ignition/sync`
 
 ## Required environment variables
 
@@ -15,6 +20,11 @@ Railway service for the Xero token exchange flow used by the iOS app.
 - `XERO_CLIENT_SECRET`
 - `XERO_REDIRECT_URI`
 - `APP_FALLBACK_CALLBACK_URI`
+- `DATABASE_URL`
+- `IGNITION_CLIENT_ID`
+- `IGNITION_CLIENT_SECRET`
+- `IGNITION_REDIRECT_URI`
+- `IGNITION_API_BASE_URL`
 
 ## Railway setup
 
@@ -45,3 +55,12 @@ Xero should redirect to the Railway backend:
 The backend then deep-links back into the app:
 
 - `jeniusai://xero/callback`
+
+## Database tables
+
+- `integration_accounts`
+- `integration_tokens`
+- `sync_runs`
+- `audit_events`
+- `ignition_clients`
+- `ignition_invoices`

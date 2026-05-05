@@ -51,7 +51,7 @@ private struct AuthenticatedShell: View {
                     ScrollView {
                         VStack(spacing: 18) {
                             MainContent(appModel: $appModel, loginHistory: loginHistory, isCompact: true)
-                            SupportRail()
+                            SupportRail(appModel: $appModel)
                         }
                         .padding(.horizontal, 20)
                         .padding(.bottom, 24)
@@ -61,7 +61,7 @@ private struct AuthenticatedShell: View {
                         MainContent(appModel: $appModel, loginHistory: loginHistory, isCompact: false)
                             .frame(maxWidth: .infinity)
 
-                        SupportRail()
+                        SupportRail(appModel: $appModel)
                             .frame(width: min(geometry.size.width * 0.28, 360))
                     }
                     .padding(.horizontal, 20)
@@ -69,6 +69,11 @@ private struct AuthenticatedShell: View {
                 }
             }
             .padding(18)
+        }
+        .task(id: appModel.xeroConnection.status) {
+            if appModel.xeroConnection.status == .connected {
+                await appModel.refreshDashboard()
+            }
         }
     }
 }
@@ -187,28 +192,35 @@ private struct DashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            if appModel.isLoadingDashboard {
+                LoadingRibbon(message: "Refreshing live dashboard data from Railway...")
+            } else if let dashboardError = appModel.dashboardError {
+                LoadingRibbon(message: dashboardError, isError: true)
+            }
+
             if isCompact {
                 VStack(spacing: 18) {
-                    MainRatesCard(trendBars: trendBars, trendBarsSecondary: trendBarsSecondary)
-                    PositionCard()
-                    LowerMetricsGrid()
+                    MainRatesCard(snapshot: appModel.dashboardSnapshot, trendBars: trendBars, trendBarsSecondary: trendBarsSecondary)
+                    PositionCard(snapshot: appModel.dashboardSnapshot)
+                    LowerMetricsGrid(snapshot: appModel.dashboardSnapshot)
                 }
             } else {
                 HStack(alignment: .top, spacing: 18) {
-                    MainRatesCard(trendBars: trendBars, trendBarsSecondary: trendBarsSecondary)
+                    MainRatesCard(snapshot: appModel.dashboardSnapshot, trendBars: trendBars, trendBarsSecondary: trendBarsSecondary)
                         .frame(maxWidth: .infinity)
 
-                    PositionCard()
+                    PositionCard(snapshot: appModel.dashboardSnapshot)
                         .frame(width: 292)
                 }
 
-                LowerMetricsGrid()
+                LowerMetricsGrid(snapshot: appModel.dashboardSnapshot)
             }
         }
     }
 }
 
 private struct MainRatesCard: View {
+    let snapshot: DashboardSnapshot?
     let trendBars: [Double]
     let trendBarsSecondary: [Double]
 
@@ -232,9 +244,9 @@ private struct MainRatesCard: View {
                 }
 
                 HStack(spacing: 26) {
-                    StatColumn(title: "Revenue", value: "£68.4k", delta: "+12%")
-                    StatColumn(title: "Receivables", value: "£17.5k", delta: "-4%")
-                    StatColumn(title: "Margin", value: "31.8%", delta: "+2.5%")
+                    StatColumn(title: "Revenue", value: snapshot?.metrics.revenue ?? "£--", delta: "LIVE")
+                    StatColumn(title: "Receivables", value: snapshot?.metrics.receivables ?? "£--", delta: snapshot?.backendStatus.uppercased() ?? "SYNC")
+                    StatColumn(title: "Margin", value: snapshot?.metrics.margin ?? "--%", delta: snapshot?.databaseStatus.uppercased() ?? "DB")
                 }
 
                 TrendChart(primary: trendBars, secondary: trendBarsSecondary)
@@ -244,12 +256,7 @@ private struct MainRatesCard: View {
 }
 
 private struct PositionCard: View {
-    private let metrics: [(String, String, String)] = [
-        ("Invoice Queue", "24", "+6"),
-        ("Meetings Closed", "12", "+2"),
-        ("Tasks Completed", "41", "+9"),
-        ("Client Health", "88%", "+4")
-    ]
+    let snapshot: DashboardSnapshot?
 
     var body: some View {
         PanelCard {
@@ -269,7 +276,7 @@ private struct PositionCard: View {
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("#24")
+                    Text(snapshot?.metrics.invoiceQueue ?? "--")
                         .font(.system(size: 42, weight: .medium, design: .rounded))
                     Text("Top tier")
                         .font(.system(size: 12, weight: .bold))
@@ -298,17 +305,28 @@ private struct PositionCard: View {
             }
         }
     }
+
+    private var metrics: [(String, String, String)] {
+        [
+            ("Invoice Queue", snapshot?.metrics.invoiceQueue ?? "--", snapshot?.syncStatus.ignitionInvoicesCount.description ?? "0"),
+            ("Meetings Closed", snapshot?.metrics.meetingsClosed ?? "--", snapshot?.xeroConnected == true ? "live" : "off"),
+            ("Tasks Completed", snapshot?.metrics.tasksCompleted ?? "--", snapshot?.ignitionConnected == true ? "ign" : "off"),
+            ("Client Health", snapshot?.metrics.clientHealth ?? "--", snapshot?.syncStatus.ignitionClientsCount.description ?? "0")
+        ]
+    }
 }
 
 private struct LowerMetricsGrid: View {
+    let snapshot: DashboardSnapshot?
+
     var body: some View {
         HStack(spacing: 18) {
             MetricMiniCard(
                 title: "Rate Submissions",
                 subtitle: "This month",
-                primaryValue: "38",
+                primaryValue: snapshot?.metrics.approvedCount ?? "--",
                 primaryLabel: "Approved",
-                secondaryValue: "5",
+                secondaryValue: snapshot?.metrics.declinedCount ?? "--",
                 secondaryLabel: "Declined",
                 accent: .coral
             )
@@ -316,14 +334,14 @@ private struct LowerMetricsGrid: View {
             MetricMiniCard(
                 title: "Cashflow Trends",
                 subtitle: "This month",
-                primaryValue: "44",
+                primaryValue: snapshot?.metrics.cashflowAverage ?? "--",
                 primaryLabel: "Average",
-                secondaryValue: "10",
+                secondaryValue: snapshot?.metrics.cashflowPeak ?? "--",
                 secondaryLabel: "Highest",
                 accent: .violet
             )
 
-            GaugeCard()
+            GaugeCard(snapshot: snapshot)
         }
     }
 }
@@ -454,17 +472,7 @@ private struct SettingsView: View {
 }
 
 private struct SupportRail: View {
-    private let prompts: [SupportPrompt] = [
-        .init(title: "Cashflow", subtitle: "What changed in receivables this week?", tint: .violet),
-        .init(title: "Forecast", subtitle: "Show likely payment slippage risks", tint: .coral),
-        .init(title: "Actions", subtitle: "Summarise clients needing follow-up", tint: .gold)
-    ]
-
-    private let feed: [SupportFeedMessage] = [
-        .init(name: "Ethan Caldwell", text: "What changed in overdue invoices for this quarter?", time: "20, 10:16"),
-        .init(name: "Lucas Bennett", text: "Rates vary by client, tax status and renewal stage.", time: "20, 10:20"),
-        .init(name: "Sophia Monroe", text: "Check these accounts matching your billing priorities below.", time: "22, 10:22")
-    ]
+    @Binding var appModel: AppModel
 
     var body: some View {
         PanelCard {
@@ -527,6 +535,43 @@ private struct SupportRail: View {
                 .background(Color(red: 0.98, green: 0.98, blue: 1.0), in: Capsule())
             }
         }
+    }
+
+    private var prompts: [SupportPrompt] {
+        let livePrompts = appModel.dashboardSnapshot?.supportPrompts.map {
+            SupportPrompt(
+                id: $0.id,
+                title: $0.title,
+                subtitle: $0.subtitle,
+                tint: AccentTone(rawValue: $0.tone) ?? .violet
+            )
+        } ?? []
+
+        if livePrompts.isEmpty {
+            return [
+                .init(title: "Cashflow", subtitle: "What changed in receivables this week?", tint: .violet),
+                .init(title: "Forecast", subtitle: "Show likely payment slippage risks", tint: .coral),
+                .init(title: "Actions", subtitle: "Summarise clients needing follow-up", tint: .gold)
+            ]
+        }
+
+        return livePrompts
+    }
+
+    private var feed: [SupportFeedMessage] {
+        let liveFeed = appModel.dashboardSnapshot?.feed.map {
+            SupportFeedMessage(id: $0.id, name: $0.name, text: $0.text, time: $0.time)
+        } ?? []
+
+        if liveFeed.isEmpty {
+            return [
+                .init(name: "Ethan Caldwell", text: "What changed in overdue invoices for this quarter?", time: "20, 10:16"),
+                .init(name: "Lucas Bennett", text: "Rates vary by client, tax status and renewal stage.", time: "20, 10:20"),
+                .init(name: "Sophia Monroe", text: "Check these accounts matching your billing priorities below.", time: "22, 10:22")
+            ]
+        }
+
+        return liveFeed
     }
 }
 
@@ -879,6 +924,8 @@ private struct MetricMiniCard: View {
 }
 
 private struct GaugeCard: View {
+    let snapshot: DashboardSnapshot?
+
     var body: some View {
         PanelCard {
             VStack(alignment: .leading, spacing: 16) {
@@ -896,9 +943,9 @@ private struct GaugeCard: View {
                 }
 
                 HStack(spacing: 18) {
-                    SmallMetric(value: "10", title: "Assessment")
-                    SmallMetric(value: "24", title: "Finalisation")
-                    SmallMetric(value: "5", title: "Approval")
+                    SmallMetric(value: snapshot?.metrics.assessments ?? "--", title: "Assessment")
+                    SmallMetric(value: snapshot?.metrics.finalisations ?? "--", title: "Finalisation")
+                    SmallMetric(value: snapshot?.metrics.approvals ?? "--", title: "Approval")
                 }
 
                 ZStack {
@@ -981,10 +1028,17 @@ private struct AccentScale: View {
 }
 
 private struct SupportPrompt: Identifiable {
-    let id = UUID()
+    let id: String
     let title: String
     let subtitle: String
     let tint: AccentTone
+
+    init(id: String = UUID().uuidString, title: String, subtitle: String, tint: AccentTone) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.tint = tint
+    }
 }
 
 private struct SupportPromptCard: View {
@@ -1008,10 +1062,17 @@ private struct SupportPromptCard: View {
 }
 
 private struct SupportFeedMessage: Identifiable {
-    let id = UUID()
+    let id: String
     let name: String
     let text: String
     let time: String
+
+    init(id: String = UUID().uuidString, name: String, text: String, time: String) {
+        self.id = id
+        self.name = name
+        self.text = text
+        self.time = time
+    }
 }
 
 private struct SupportFeedRow: View {
@@ -1161,6 +1222,26 @@ private struct InfoChip: View {
     }
 }
 
+private struct LoadingRibbon: View {
+    let message: String
+    var isError = false
+
+    var body: some View {
+        Text(message)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(isError ? Color.red : Color(red: 0.38, green: 0.41, blue: 0.49))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                isError
+                    ? Color(red: 1.0, green: 0.93, blue: 0.93)
+                    : Color.white.opacity(0.72),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+    }
+}
+
 private struct CapsuleAction: View {
     let title: String
     var filled = false
@@ -1286,7 +1367,7 @@ private struct AppBackground: View {
     }
 }
 
-private enum AccentTone {
+private enum AccentTone: String {
     case coral
     case violet
     case gold

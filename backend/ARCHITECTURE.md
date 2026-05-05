@@ -26,6 +26,11 @@ Initial internal API endpoints:
 - `GET /auth/xero/start`
 - `GET /auth/xero/callback`
 - `POST /auth/xero/exchange`
+- `GET /auth/ignition/start`
+- `GET /auth/ignition/callback`
+- `GET /api/ignition/clients`
+- `GET /api/ignition/invoices`
+- `POST /api/ignition/sync`
 
 Planned next endpoints:
 
@@ -88,15 +93,31 @@ These should be enforced on the backend, not in the app UI.
 
 Backend:
 
+- `DATABASE_URL`
 - `XERO_CLIENT_ID`
 - `XERO_CLIENT_SECRET`
 - `XERO_REDIRECT_URI=https://<service>.up.railway.app/auth/xero/callback`
 - `APP_FALLBACK_CALLBACK_URI=jeniusai://xero/callback`
+- `IGNITION_CLIENT_ID`
+- `IGNITION_CLIENT_SECRET`
+- `IGNITION_REDIRECT_URI=https://<service>.up.railway.app/auth/ignition/callback`
+- `IGNITION_API_BASE_URL=https://developers.ignitionapp.com/external/api/v1`
 
 App:
 
 - `APP_CALLBACK_URI=jeniusai://xero/callback`
 - `RAILWAY_BASE_URL=https://<service>.up.railway.app`
+
+## Persistence model
+
+Railway PostgreSQL now holds:
+
+- `integration_accounts`
+- `integration_tokens`
+- `sync_runs`
+- `audit_events`
+- `ignition_clients`
+- `ignition_invoices`
 
 ## Immediate next steps
 
