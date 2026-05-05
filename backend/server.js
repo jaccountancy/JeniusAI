@@ -860,21 +860,24 @@ function codeChallenge(verifier) {
 
 function resolveOAuthRedirectURI(request, configuredURL, callbackPath) {
     const normalizedConfiguredURL = normalizeURLString(configuredURL);
-    const derivedRequestURL = buildPublicURL(request, callbackPath);
-
-    if (!derivedRequestURL) {
+    if (normalizedConfiguredURL) {
         return normalizedConfiguredURL;
+    }
+
+    const derivedRequestURL = buildPublicURL(request, callbackPath);
+    if (!derivedRequestURL) {
+        return null;
     }
 
     try {
         const derivedURL = new URL(derivedRequestURL);
         if (isLocalHost(derivedURL.hostname)) {
-            return normalizedConfiguredURL ?? derivedURL.toString();
+            return null;
         }
 
         return derivedURL.toString();
     } catch {
-        return normalizedConfiguredURL;
+        return null;
     }
 }
 
@@ -903,9 +906,6 @@ function normalizeURLString(value) {
 
     try {
         const normalizedURL = new URL(trimmedValue);
-        if (normalizedURL.pathname.length > 1) {
-            normalizedURL.pathname = normalizedURL.pathname.replace(/\/+$/, "");
-        }
         return normalizedURL.toString();
     } catch {
         return null;
