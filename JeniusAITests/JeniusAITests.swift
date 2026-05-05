@@ -10,11 +10,10 @@ import Testing
 @testable import JeniusAI
 
 struct JeniusAITests {
-    @Test func xeroAuthorizationURLUsesPKCE() throws {
+    @Test func xeroAuthorizationURLUsesRailwayStartFlow() throws {
         let configuration = AppConfiguration(
-            xeroClientID: "demo-client-id",
-            xeroRedirectURI: URL(string: "jeniusai://xero/callback")!,
-            railwayBaseURL: nil
+            railwayBaseURL: URL(string: "https://jeniusai-production.up.railway.app")!,
+            appCallbackURI: URL(string: "jeniusai://xero/callback")!
         )
         let service = XeroAuthService(
             configuration: configuration,
@@ -24,9 +23,7 @@ struct JeniusAITests {
         let url = try service.authorizationURL()
         let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
 
-        #expect(url.absoluteString.contains("login.xero.com/identity/connect/authorize"))
-        #expect(queryItems.contains(where: { $0.name == "client_id" && $0.value == "demo-client-id" }))
-        #expect(queryItems.contains(where: { $0.name == "code_challenge_method" && $0.value == "S256" }))
-        #expect(queryItems.contains(where: { $0.name == "scope" }))
+        #expect(url.absoluteString.contains("/auth/xero/start"))
+        #expect(queryItems.contains(where: { $0.name == "app_callback" && $0.value == "jeniusai://xero/callback" }))
     }
 }

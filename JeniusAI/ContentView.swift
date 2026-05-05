@@ -369,8 +369,8 @@ private struct SettingsView: View {
             CardPanel(title: "Xero Integration", subtitle: "OAuth entry point with Railway exchange handoff.") {
                 VStack(alignment: .leading, spacing: 16) {
                     LabeledValue(label: "Status", value: appModel.xeroConnection.status.label, tint: appModel.xeroConnection.status.tint)
-                    LabeledValue(label: "Client ID", value: AppConfiguration.shared.xeroClientID.isEmpty ? "Not configured" : AppConfiguration.shared.xeroClientID)
-                    LabeledValue(label: "Redirect URI", value: AppConfiguration.shared.xeroRedirectURI.absoluteString)
+                    LabeledValue(label: "App Callback", value: AppConfiguration.shared.appCallbackURI.absoluteString)
+                    LabeledValue(label: "Xero Web Redirect", value: AppConfiguration.shared.xeroWebRedirectURI?.absoluteString ?? "Set `RAILWAY_BASE_URL` to generate the Railway callback")
                     LabeledValue(label: "Railway Backend", value: AppConfiguration.shared.railwayBaseURL?.absoluteString ?? "Not configured")
 
                     if let message = appModel.xeroConnection.lastMessage {

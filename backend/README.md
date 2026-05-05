@@ -5,6 +5,8 @@ Railway service for the Xero token exchange flow used by the iOS app.
 ## Endpoints
 
 - `GET /health`
+- `GET /auth/xero/start`
+- `GET /auth/xero/callback`
 - `POST /auth/xero/exchange`
 
 ## Required environment variables
@@ -12,6 +14,7 @@ Railway service for the Xero token exchange flow used by the iOS app.
 - `XERO_CLIENT_ID`
 - `XERO_CLIENT_SECRET`
 - `XERO_REDIRECT_URI`
+- `APP_FALLBACK_CALLBACK_URI`
 
 ## Railway setup
 
@@ -35,6 +38,10 @@ Point the iOS app to the generated public domain:
 
 - `RAILWAY_BASE_URL=https://<your-service>.up.railway.app`
 
-Keep the Xero redirect URI aligned everywhere:
+Xero should redirect to the Railway backend:
+
+- `https://<your-service>.up.railway.app/auth/xero/callback`
+
+The backend then deep-links back into the app:
 
 - `jeniusai://xero/callback`

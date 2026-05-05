@@ -23,6 +23,8 @@ This is the **phase 1 backend**, not the final platform boundary. If the product
 Initial internal API endpoints:
 
 - `GET /health`
+- `GET /auth/xero/start`
+- `GET /auth/xero/callback`
 - `POST /auth/xero/exchange`
 
 Planned next endpoints:
@@ -40,11 +42,12 @@ Two auth layers are required and should stay separate.
 
 - Purpose: connect a Xero organisation to JeniusAI
 - Flow:
-  1. iOS app starts PKCE sign-in with Xero
-  2. Xero redirects back to `jeniusai://xero/callback`
-  3. iOS app sends the auth code and PKCE verifier to Railway
+  1. iOS app opens Railway at `/auth/xero/start`
+  2. Railway generates PKCE state/verifier and redirects to Xero
+  3. Xero redirects back to Railway at `/auth/xero/callback`
   4. Railway exchanges the code with Xero using the client secret
-  5. Railway stores Xero tokens securely server-side
+  5. Railway deep-links back to `jeniusai://xero/callback`
+  6. Railway stores Xero tokens securely server-side
 
 This keeps the Xero client secret out of the iOS app.
 
@@ -87,18 +90,18 @@ Backend:
 
 - `XERO_CLIENT_ID`
 - `XERO_CLIENT_SECRET`
-- `XERO_REDIRECT_URI=jeniusai://xero/callback`
+- `XERO_REDIRECT_URI=https://<service>.up.railway.app/auth/xero/callback`
+- `APP_FALLBACK_CALLBACK_URI=jeniusai://xero/callback`
 
 App:
 
-- `XERO_CLIENT_ID`
-- `XERO_REDIRECT_URI=jeniusai://xero/callback`
+- `APP_CALLBACK_URI=jeniusai://xero/callback`
 - `RAILWAY_BASE_URL=https://<service>.up.railway.app`
 
 ## Immediate next steps
 
 1. Deploy the backend service from the `backend` folder in Railway.
 2. Add the three Xero backend environment variables.
-3. Add `jeniusai://xero/callback` in Xero Developer.
+3. Add `https://<service>.up.railway.app/auth/xero/callback` in Xero Developer.
 4. Point the iOS app at the Railway public domain.
 5. Replace in-memory/sample data with API-backed dashboard and workflow endpoints.

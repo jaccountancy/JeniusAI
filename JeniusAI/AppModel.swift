@@ -171,7 +171,7 @@ final class AppModel {
     ]
 
     let backendRecommendations: [String] = [
-        "Use Railway for `/auth/xero/exchange`, refresh-token rotation and tenant discovery.",
+        "Use Railway for `/auth/xero/start` and `/auth/xero/callback`, with server-side token storage and tenant discovery.",
         "Store tokens server-side only; keep the iOS app limited to session state and display data.",
         "Expose a compact dashboard API for workspaces, recent activity and workflow counts."
     ]
@@ -179,8 +179,8 @@ final class AppModel {
     var setupSteps: [SetupStep] {
         [
             SetupStep(title: "Front-end navigation shell", detail: "Dashboard, sidebar, responsive layout and settings panel are implemented in SwiftUI.", isComplete: true),
-            SetupStep(title: "Xero sign-in trigger", detail: "The app can start the OAuth flow and listen for the callback URL.", isComplete: true),
-            SetupStep(title: "Railway token exchange", detail: "Wire your backend endpoint so the app can trade the code for a secure server-side session.", isComplete: AppConfiguration.shared.railwayBaseURL != nil),
+            SetupStep(title: "Xero sign-in trigger", detail: "The app opens Railway, which starts Xero auth and returns to the app by deep link.", isComplete: true),
+            SetupStep(title: "Railway callback flow", detail: "Set Xero to call Railway at `/auth/xero/callback` so the backend can exchange tokens securely.", isComplete: AppConfiguration.shared.railwayBaseURL != nil),
             SetupStep(title: "Live workspace data", detail: "Replace static sample content with API-backed folders, workflows and alerts.", isComplete: false)
         ]
     }
