@@ -8,6 +8,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import SwiftData
 
 enum NavigationSection: String, CaseIterable, Identifiable {
     case dashboard
@@ -126,10 +127,38 @@ struct XeroConnection {
     var lastMessage: String?
 }
 
+enum LoginEventType: String {
+    case launch
+    case loginStarted
+    case loginSucceeded
+    case loginFailed
+    case sessionRestored
+    case sessionCleared
+
+    var title: String {
+        switch self {
+        case .launch:
+            return "App launch"
+        case .loginStarted:
+            return "Login started"
+        case .loginSucceeded:
+            return "Login succeeded"
+        case .loginFailed:
+            return "Login failed"
+        case .sessionRestored:
+            return "Session restored"
+        case .sessionCleared:
+            return "Session cleared"
+        }
+    }
+}
+
 @Observable
+@MainActor
 final class AppModel {
     var selectedSection: NavigationSection = .dashboard
     var xeroConnection = XeroConnection()
+    var isRestoring = true
 
     let recentItems: [WorkspaceItem] = [
         WorkspaceItem(title: "Year-end accounts pack", subtitle: "Personal Folders", iconName: "doc.text"),
@@ -181,47 +210,110 @@ final class AppModel {
             SetupStep(title: "Front-end navigation shell", detail: "Dashboard, sidebar, responsive layout and settings panel are implemented in SwiftUI.", isComplete: true),
             SetupStep(title: "Xero sign-in trigger", detail: "The app opens Railway, which starts Xero auth and returns to the app by deep link.", isComplete: true),
             SetupStep(title: "Railway callback flow", detail: "Set Xero to call Railway at `/auth/xero/callback` so the backend can exchange tokens securely.", isComplete: AppConfiguration.shared.railwayBaseURL != nil),
-            SetupStep(title: "Live workspace data", detail: "Replace static sample content with API-backed folders, workflows and alerts.", isComplete: false)
+            SetupStep(title: "Persistent audit trail", detail: "Login status, history and session metadata are saved locally in SwiftData.", isComplete: true)
         ]
     }
 
     private let xeroAuthService = XeroAuthService()
 
-    func beginXeroLogin() throws -> URL {
+    var requiresAuthentication: Bool {
+        isRestoring || xeroConnection.status != .connected
+    }
+
+    func beginXeroLogin(using modelContext: ModelContext) throws -> URL {
         xeroConnection.status = .connecting
         xeroConnection.lastMessage = "Opening Xero sign-in..."
+        persistSession(using: modelContext)
+        appendHistory(.loginStarted, message: "Started Xero sign-in flow.", tenantName: nil, using: modelContext)
         return try xeroAuthService.authorizationURL()
     }
 
-    func handleIncomingURL(_ url: URL) async {
+    func handleIncomingURL(_ url: URL, using modelContext: ModelContext) async {
         do {
             let result = try await xeroAuthService.handleCallback(url)
             xeroConnection.status = .connected
             xeroConnection.tenantName = result.tenantName
             xeroConnection.lastMessage = result.message
             selectedSection = .settings
+            persistSession(using: modelContext)
+            appendHistory(.loginSucceeded, message: result.message, tenantName: result.tenantName, using: modelContext)
         } catch {
             xeroConnection.status = .failed
             xeroConnection.lastMessage = error.localizedDescription
             selectedSection = .settings
+            persistSession(using: modelContext)
+            appendHistory(.loginFailed, message: error.localizedDescription, tenantName: nil, using: modelContext)
         }
     }
 
-    func restoreConnection() async {
+    func restoreConnection(using modelContext: ModelContext) async {
+        appendHistory(.launch, message: "App launched.", tenantName: nil, using: modelContext)
+
+        if let session = fetchSession(using: modelContext) {
+            xeroConnection.status = XeroConnectionStatus(rawValue: session.statusRawValue) ?? .disconnected
+            xeroConnection.tenantName = session.tenantName
+            xeroConnection.lastMessage = session.lastMessage
+
+            if xeroConnection.status == .connected {
+                appendHistory(.sessionRestored, message: session.lastMessage ?? "Restored persisted Xero session.", tenantName: session.tenantName, using: modelContext)
+            }
+            isRestoring = false
+            return
+        }
+
         if let restored = xeroAuthService.restoreSession() {
             xeroConnection.status = .connected
             xeroConnection.tenantName = restored.tenantName
             xeroConnection.lastMessage = restored.message
+            persistSession(using: modelContext)
+            appendHistory(.sessionRestored, message: restored.message, tenantName: restored.tenantName, using: modelContext)
         }
+        isRestoring = false
     }
 
-    func clearConnection() {
+    func clearConnection(using modelContext: ModelContext) {
         xeroAuthService.clearSession()
         xeroConnection = XeroConnection(status: .disconnected, tenantName: nil, lastMessage: "Connection reset. Ready to start again.")
+        persistSession(using: modelContext)
+        appendHistory(.sessionCleared, message: "Session cleared by user.", tenantName: nil, using: modelContext)
     }
 
-    func setXeroFailure(_ message: String) {
+    func setXeroFailure(_ message: String, using modelContext: ModelContext) {
         xeroConnection.status = .failed
         xeroConnection.lastMessage = message
+        persistSession(using: modelContext)
+        appendHistory(.loginFailed, message: message, tenantName: nil, using: modelContext)
+    }
+
+    private func fetchSession(using modelContext: ModelContext) -> PersistedSession? {
+        let descriptor = FetchDescriptor<PersistedSession>(
+            predicate: #Predicate<PersistedSession> { $0.key == "primary" }
+        )
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func persistSession(using modelContext: ModelContext) {
+        let session = fetchSession(using: modelContext) ?? {
+            let newSession = PersistedSession()
+            modelContext.insert(newSession)
+            return newSession
+        }()
+
+        session.statusRawValue = xeroConnection.status.rawValue
+        session.tenantName = xeroConnection.tenantName
+        session.lastMessage = xeroConnection.lastMessage
+        session.lastUpdatedAt = .now
+        session.lastAuthenticatedAt = xeroConnection.status == .connected ? .now : session.lastAuthenticatedAt
+
+        try? modelContext.save()
+    }
+
+    private func appendHistory(_ eventType: LoginEventType, message: String, tenantName: String?, using modelContext: ModelContext) {
+        modelContext.insert(LoginHistoryRecord(
+            eventTypeRawValue: eventType.rawValue,
+            message: message,
+            tenantName: tenantName
+        ))
+        try? modelContext.save()
     }
 }

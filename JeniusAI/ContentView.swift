@@ -6,8 +6,11 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \LoginHistoryRecord.timestamp, order: .reverse) private var loginHistory: [LoginHistoryRecord]
     @State private var appModel = AppModel()
 
     var body: some View {
@@ -15,34 +18,38 @@ struct ContentView: View {
             Color(red: 0.95, green: 0.96, blue: 0.98)
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                GeometryReader { geometry in
-                    let isCompact = geometry.size.width < 940
+            if appModel.requiresAuthentication {
+                LoginGateView(appModel: $appModel)
+            } else {
+                VStack(spacing: 0) {
+                    GeometryReader { geometry in
+                        let isCompact = geometry.size.width < 940
 
-                    if isCompact {
-                        VStack(spacing: 0) {
-                            TopBar(connectionStatus: appModel.xeroConnection.status, isCompact: true)
-                            Picker("Section", selection: $appModel.selectedSection) {
-                                ForEach(NavigationSection.allCases) { section in
-                                    Text(section.title).tag(section)
+                        if isCompact {
+                            VStack(spacing: 0) {
+                                TopBar(connectionStatus: appModel.xeroConnection.status, isCompact: true)
+                                Picker("Section", selection: $appModel.selectedSection) {
+                                    ForEach(NavigationSection.allCases) { section in
+                                        Text(section.title).tag(section)
+                                    }
                                 }
+                                .pickerStyle(.segmented)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.white)
+
+                                SectionDetailView(appModel: $appModel, isCompact: true, loginHistory: loginHistory)
                             }
-                            .pickerStyle(.segmented)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(Color.white)
+                        } else {
+                            VStack(spacing: 0) {
+                                TopBar(connectionStatus: appModel.xeroConnection.status, isCompact: false)
 
-                            SectionDetailView(appModel: $appModel, isCompact: true)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            TopBar(connectionStatus: appModel.xeroConnection.status, isCompact: false)
+                                HStack(spacing: 0) {
+                                    Sidebar(selectedSection: $appModel.selectedSection)
+                                        .frame(width: 255)
 
-                            HStack(spacing: 0) {
-                                Sidebar(selectedSection: $appModel.selectedSection)
-                                    .frame(width: 255)
-
-                                SectionDetailView(appModel: $appModel, isCompact: false)
+                                    SectionDetailView(appModel: $appModel, isCompact: false, loginHistory: loginHistory)
+                                }
                             }
                         }
                     }
@@ -51,11 +58,11 @@ struct ContentView: View {
         }
         .preferredColorScheme(.light)
         .task {
-            await appModel.restoreConnection()
+            await appModel.restoreConnection(using: modelContext)
         }
         .onOpenURL { url in
             Task {
-                await appModel.handleIncomingURL(url)
+                await appModel.handleIncomingURL(url, using: modelContext)
             }
         }
     }
@@ -176,6 +183,7 @@ private struct Sidebar: View {
 private struct SectionDetailView: View {
     @Binding var appModel: AppModel
     let isCompact: Bool
+    let loginHistory: [LoginHistoryRecord]
 
     var body: some View {
         ScrollView {
@@ -208,7 +216,7 @@ private struct SectionDetailView: View {
                         items: appModel.peopleItems
                     )
                 case .settings:
-                    SettingsView(appModel: $appModel)
+                    SettingsView(appModel: $appModel, loginHistory: loginHistory)
                 }
             }
             .padding(24)
@@ -362,7 +370,9 @@ private struct WorkspaceListView: View {
 
 private struct SettingsView: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.modelContext) private var modelContext
     @Binding var appModel: AppModel
+    let loginHistory: [LoginHistoryRecord]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -389,12 +399,26 @@ private struct SettingsView: View {
                         .buttonStyle(PrimaryActionButtonStyle())
 
                         Button {
-                            appModel.clearConnection()
+                            appModel.clearConnection(using: modelContext)
                         } label: {
                             Label("Reset", systemImage: "arrow.counterclockwise")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(SecondaryActionButtonStyle())
+                    }
+                }
+            }
+
+            CardPanel(title: "Login History", subtitle: "Persisted audit trail stored in the local SwiftData database.") {
+                if loginHistory.isEmpty {
+                    Text("No login events recorded yet.")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.secondary)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(loginHistory.prefix(8)) { record in
+                            LoginHistoryRow(record: record)
+                        }
                     }
                 }
             }
@@ -415,10 +439,77 @@ private struct SettingsView: View {
 private extension SettingsView {
     func connectToXero() {
         do {
-            let url = try appModel.beginXeroLogin()
+            let url = try appModel.beginXeroLogin(using: modelContext)
             openURL(url)
         } catch {
-            appModel.setXeroFailure(error.localizedDescription)
+            appModel.setXeroFailure(error.localizedDescription, using: modelContext)
+        }
+    }
+}
+
+private struct LoginGateView: View {
+    @Environment(\.openURL) private var openURL
+    @Environment(\.modelContext) private var modelContext
+    @Binding var appModel: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TopBar(connectionStatus: appModel.xeroConnection.status, isCompact: false)
+
+            Spacer()
+
+            VStack(alignment: .leading, spacing: 20) {
+                Image("JaccountancyBlueHorizontal_1")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 260)
+
+                Text("Xero login required")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.19, blue: 0.25))
+
+                Text("This workspace is locked until a Xero account is connected. Login events and session changes are stored persistently in the local database.")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color(red: 0.42, green: 0.45, blue: 0.52))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let message = appModel.xeroConnection.lastMessage {
+                    Text(message)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(appModel.xeroConnection.status.tint)
+                }
+
+                Button {
+                    connectToXero()
+                } label: {
+                    Label("Login with Xero", systemImage: "link.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryActionButtonStyle())
+
+                HStack(spacing: 12) {
+                    InfoChip(title: "Database", value: "SwiftData persistent store")
+                    InfoChip(title: "Audit", value: "Login history recorded")
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 640, alignment: .leading)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color(red: 0.88, green: 0.90, blue: 0.93), lineWidth: 1)
+            }
+
+            Spacer()
+        }
+    }
+
+    private func connectToXero() {
+        do {
+            let url = try appModel.beginXeroLogin(using: modelContext)
+            openURL(url)
+        } catch {
+            appModel.setXeroFailure(error.localizedDescription, using: modelContext)
         }
     }
 }
@@ -549,6 +640,59 @@ private struct LabeledValue: View {
                 .foregroundStyle(tint)
                 .textSelection(.enabled)
         }
+    }
+}
+
+private struct LoginHistoryRow: View {
+    let record: LoginHistoryRecord
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LoginEventType(rawValue: record.eventTypeRawValue)?.title ?? record.eventTypeRawValue)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.08, green: 0.12, blue: 0.20))
+                Text(record.message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.secondary)
+                if let tenantName = record.tenantName {
+                    Text(tenantName)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color(red: 0.14, green: 0.45, blue: 0.78))
+                }
+            }
+
+            Spacer()
+
+            Text(record.timestamp, format: Date.FormatStyle(date: .abbreviated, time: .shortened))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.secondary)
+        }
+        .padding(14)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color(red: 0.91, green: 0.92, blue: 0.95), lineWidth: 1)
+        }
+    }
+}
+
+private struct InfoChip: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.secondary)
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(red: 0.08, green: 0.12, blue: 0.20))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color(red: 0.95, green: 0.97, blue: 1.0), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 

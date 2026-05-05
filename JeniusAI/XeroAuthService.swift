@@ -14,7 +14,7 @@ struct AppConfiguration {
     let appCallbackURI: URL
 
     init(
-        railwayBaseURL: URL? = ProcessInfo.processInfo.environment["RAILWAY_BASE_URL"].flatMap(URL.init(string:)),
+        railwayBaseURL: URL? = ProcessInfo.processInfo.environment["RAILWAY_BASE_URL"].flatMap(URL.init(string:)) ?? URL(string: "https://jeniusai-production.up.railway.app"),
         appCallbackURI: URL = URL(string: ProcessInfo.processInfo.environment["APP_CALLBACK_URI"] ?? "jeniusai://xero/callback")!
     ) {
         self.railwayBaseURL = railwayBaseURL
